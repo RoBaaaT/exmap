@@ -16,6 +16,7 @@
 #include <linux/cdev.h>
 #include <linux/random.h>
 #include <linux/mmu_notifier.h>
+#include <linux/version.h>
 
 #include <linux/pgtable.h>
 #include <asm/io.h>
@@ -334,7 +335,7 @@ exmap_alloc_pages(struct exmap_ctx *ctx,
 	if (min_pages == 0)
 		return 0;
 
-   
+
 	// 2. We start to steal pages from other interfaces.
 	steal_count = steal_pages(ctx, interface, pages, min_pages);
 	// pr_info("StolenB[%p]: %d\n", interface, steal_count);
@@ -725,23 +726,6 @@ int exmap_submit_and_wait(struct exmap_alloc_ctx *ctx) {
 	return data.error;
 }
 
-/**
- * bio_full - check if the bio is full
- * @bio:	bio to check
- * @len:	length of one segment to be added
- *
- * Return true if @bio is full and one segment with @len bytes can't be
- * added to the bio, otherwise return false
- */
-static inline bool bio_full(struct bio *bio, unsigned len)
-{
-	if (bio->bi_vcnt >= bio->bi_max_vecs)
-		return true;
-	if (bio->bi_iter.bi_size > UINT_MAX - len)
-		return true;
-	return false;
-}
-
 
 int
 exmap_alloc(struct exmap_ctx *ctx, struct exmap_action_params *params) {
@@ -922,7 +906,7 @@ static long exmap_ioctl (struct file *file, unsigned int cmd, unsigned long arg)
 		if (setup.fd >= 0) {
 			struct file *file = fget(setup.fd);
 			struct inode *inode;
-			
+
 			if (!file) goto out_fput;
 
 			if (!(file->f_flags & O_DIRECT)) {
@@ -1036,6 +1020,46 @@ static long exmap_ioctl (struct file *file, unsigned int cmd, unsigned long arg)
 	return rc;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
+struct iov_iter_state {
+	size_t iov_offset;
+	size_t count;
+	unsigned long nr_segs;
+};
+
+static inline void iov_iter_save_state(struct iov_iter *iter,
+				       struct iov_iter_state *state)
+{
+	state->iov_offset = iter->iov_offset;
+	state->count = iter->count;
+	state->nr_segs = iter->nr_segs;
+}
+
+void iov_iter_restore(struct iov_iter *i, struct iov_iter_state *state)
+{
+	if (WARN_ON_ONCE(!iov_iter_is_bvec(i) && !iter_is_iovec(i)) &&
+			 !iov_iter_is_kvec(i))
+		return;
+	i->iov_offset = state->iov_offset;
+	i->count = state->count;
+	/*
+	 * For the *vec iters, nr_segs + iov is constant - if we increment
+	 * the vec, then we also decrement the nr_segs count. Hence we don't
+	 * need to track both of these, just one is enough and we can deduct
+	 * the other from that. ITER_KVEC and ITER_IOVEC are the same struct
+	 * size, so we can just increment the iov pointer as they are unionzed.
+	 * ITER_BVEC _may_ be the same size on some archs, but on others it is
+	 * not. Be safe and handle it separately.
+	 */
+	BUILD_BUG_ON(sizeof(struct iovec) != sizeof(struct kvec));
+	if (iov_iter_is_bvec(i))
+		i->bvec -= state->nr_segs - i->nr_segs;
+	else
+		i->iov -= state->nr_segs - i->nr_segs;
+	i->nr_segs = state->nr_segs;
+}
+#endif
+
 ssize_t exmap_alloc_iter(struct exmap_ctx *ctx, struct exmap_interface *interface, struct iov_iter *iter) {
 	ssize_t total_nr_pages = iov_iter_count(iter) >> PAGE_SHIFT;
 	struct iov_iter_state iter_state;
@@ -1068,7 +1092,7 @@ ssize_t exmap_alloc_iter(struct exmap_ctx *ctx, struct exmap_interface *interfac
 			return -EINVAL;
 		}
 		if (((uintptr_t) addr) & ~PAGE_MASK) // Not aligned start
-		{ 
+		{
 			pr_info("addr");
 			return -EINVAL;
 		}

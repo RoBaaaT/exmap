@@ -6,6 +6,7 @@
 #include <linux/rmap.h>
 #include <linux/kprobes.h>
 #include <linux/uio.h>
+#include <linux/version.h>
 
 static struct kprobe kp = {
 	.symbol_name = "kallsyms_lookup_name"
@@ -20,7 +21,9 @@ static void (*flush_tlb_mm_range_ksym)(struct mm_struct *mm, unsigned long start
 static ssize_t (*vfs_read_ksym)(struct file *file, char __user *buf,
 						 size_t count, loff_t *pos);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
 static void (*iov_iter_restore_ksym)(struct iov_iter *i, struct iov_iter_state *state);
+#endif
 
 
 typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
@@ -37,7 +40,7 @@ int exmap_acquire_ksyms(void)
 	register_kprobe(&kp);
 	kallsyms_lookup_name = (kallsyms_lookup_name_t) kp.addr;
 	unregister_kprobe(&kp);
-	/* 
+	/*
 	 * Try to find all necessary symbols,
 	 * return -1 if any lookup fails
 	 */
@@ -49,10 +52,11 @@ int exmap_acquire_ksyms(void)
 	if(!vfs_read_ksym)
 		return -1;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
 	iov_iter_restore_ksym = (void *)kallsyms_lookup_name("iov_iter_restore");
 	if(!iov_iter_restore_ksym)
 		return -1;
-
+#endif
 
 	return 0;
 }
@@ -64,18 +68,19 @@ void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
 	flush_tlb_mm_range_ksym(mm, start, end, stride_shift, freed_tables);
 }
 
-ssize_t vfs_read(struct file *file, char __user *buf, 
+ssize_t vfs_read(struct file *file, char __user *buf,
 				 size_t count, loff_t *pos)
 {
 	return vfs_read_ksym(file, buf, count, pos);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
 void iov_iter_restore(struct iov_iter *i, struct iov_iter_state *state)
 {
 	return iov_iter_restore_ksym(i, state);
 }
+#endif
 
-#include <linux/version.h>
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
 #include <linux/vmalloc.h>
 
