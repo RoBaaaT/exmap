@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <set>
+#include <vector>
 
 #define die(fmt) do { perror(fmt); exit(EXIT_FAILURE); } while(0)
 
