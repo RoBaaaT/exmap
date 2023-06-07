@@ -1021,6 +1021,7 @@ static long exmap_ioctl (struct file *file, unsigned int cmd, unsigned long arg)
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,21)
 struct iov_iter_state {
 	size_t iov_offset;
 	size_t count;
@@ -1034,6 +1035,7 @@ static inline void iov_iter_save_state(struct iov_iter *iter,
 	state->count = iter->count;
 	state->nr_segs = iter->nr_segs;
 }
+#endif
 
 void iov_iter_restore(struct iov_iter *i, struct iov_iter_state *state)
 {
